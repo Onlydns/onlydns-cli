@@ -1,0 +1,56 @@
+{
+  "name": "@onlydns/cli",
+  "version": "1.0.0",
+  "description": "Official Command-Line Interface (CLI) for OnlyDNS System API (onlydns.com)",
+  "author": "OnlyDNS <support@onlydns.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/onlydns/onlydns-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/onlydns/onlydns-cli/issues"
+  },
+  "homepage": "https://github.com/onlydns/onlydns-cli#readme",
+  "bin": {
+    "onlydns": "dist/bin.js",
+    "onlydns-cli": "dist/bin.js",
+    "@onlydns/cli": "dist/bin.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test tests/*.test.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "onlydns",
+    "dns",
+    "cli",
+    "dns-management",
+    "dnssec",
+    "tsig",
+    "ai-agent",
+    "typescript"
+  ],
+  "dependencies": {
+    "@onlydns/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

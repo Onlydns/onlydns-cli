@@ -1,6 +1,6 @@
 # @onlydns/cli
 
-Official Command-Line Interface (CLI) for the **OnlyDNS System API** ([onlydns.com](https://onlydns.com)).
+Official Command-Line Interface (CLI) for the **OnlyDNS System API** ([onlydns.com](https://www.onlydns.com)).
 
 Fast, type-safe, and zero-bloat tool for human developers and autonomous AI agents to manage DNS zones, DNS records, DNSSEC signing, and TSIG keys directly from the terminal or scripts.
 
@@ -181,4 +181,4 @@ const exitCode = await runCli(['records', 'list', 'example.com', '--json']);
 
 ## License
 
-MIT License. Developed for [OnlyDNS](https://onlydns.com).
+MIT License. Developed for [OnlyDNS](https://www.onlydns.com).

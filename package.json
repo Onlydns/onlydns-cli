@@ -9,12 +9,12 @@
   "types": "dist/index.d.ts",
   "repository": {
     "type": "git",
-    "url": "https://github.com/onlydns/onlydns-cli.git"
+    "url": "https://github.com/Onlydns/onlydns-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/onlydns/onlydns-cli/issues"
+    "url": "https://github.com/Onlydns/onlydns-cli/issues"
   },
-  "homepage": "https://github.com/onlydns/onlydns-cli#readme",
+  "homepage": "https://github.com/Onlydns/onlydns-cli#readme",
   "bin": {
     "onlydns": "dist/bin.js",
     "onlydns-cli": "dist/bin.js",

@@ -19,6 +19,7 @@ import type {
   DNSRecord,
   DNSSECStatus,
   TsigKey,
+  DomainTsigPermissions,
   RecordType,
   TsigAlgorithm,
 } from '@onlydns/sdk';
@@ -122,6 +123,20 @@ export function formatTsigKeysList(keys: TsigKey[]): string {
   const lines = [`TSIG Keys (${keys.length}):`];
   for (const k of keys) {
     lines.push(`  - ${k.name.padEnd(30)} (${k.algorithm})`);
+  }
+  return lines.join('\n');
+}
+
+export function formatDomainTsigPermissions(domain: string, perms: Record<string, DomainTsigPermissions>): string {
+  const keys = Object.keys(perms);
+  if (keys.length === 0) {
+    return `No TSIG keys configured for domain '${domain}'.`;
+  }
+  const lines = [`TSIG Key Permissions for domain '${domain}':`];
+  for (const k of keys) {
+    const p = perms[k];
+    const subStr = p.subdomains && p.subdomains.length > 0 ? ` (Subdomains: ${p.subdomains.join(', ')})` : '';
+    lines.push(`  - ${k.padEnd(28)} AXFR=${p.allowAxfr}, DynamicUpdate=${p.allowDnsUpdate}${subStr}`);
   }
   return lines.join('\n');
 }
@@ -570,39 +585,69 @@ export async function cmdTsig(args: ParsedArgs, opts?: CliOptions): Promise<numb
     return 0;
   }
 
+  if (action === 'get-domain' || action === 'domain') {
+    const domain = args.positionals[0] || (args.options.domain as string | undefined);
+    if (!domain || !domain.trim()) {
+      err('Error: Domain name is required. Usage: onlydns tsig get-domain <domain>');
+      return 2;
+    }
+    const perms = await client.getDomainTsig(domain.trim());
+    if (args.json) {
+      out(JSON.stringify(perms, null, 2));
+    } else {
+      out(formatDomainTsigPermissions(domain.trim(), perms));
+    }
+    return 0;
+  }
+
   if (action === 'set-permissions') {
     const domain = args.positionals[0] || (args.options.domain as string | undefined);
     const keyName = args.positionals[1] || (args.options.keyName as string | undefined);
     if (!domain || !domain.trim() || !keyName || !keyName.trim()) {
-      err('Error: Domain name and TSIG key name are required. Usage: onlydns tsig set-permissions <domain> <key_name> [--transfer] [--update]');
+      err('Error: Domain name and TSIG key name are required. Usage: onlydns tsig set-permissions <domain> <key_name> [--transfer] [--update] [--subdomain SUBDOMAIN]');
       return 2;
     }
+
+    const rawSubdomains = Array.isArray(args.options.subdomain)
+      ? args.options.subdomain
+      : args.options.subdomain
+      ? [args.options.subdomain as string]
+      : [];
+
+    const subdomains: string[] = [];
+    for (const s of rawSubdomains) {
+      for (const part of s.split(',')) {
+        if (part.trim()) subdomains.push(part.trim());
+      }
+    }
+
     const transfer = Boolean(args.options.transfer || args.options.axfr);
-    const update = Boolean(args.options.update);
+    const update = Boolean(args.options.update || subdomains.length > 0);
 
     await client.updateDomainTsig(
       domain.trim(),
       keyName.trim(),
       transfer,
-      update
+      update,
+      subdomains.length > 0 ? subdomains : undefined
     );
 
+    const payload: Record<string, unknown> = {
+      status: 'ok',
+      domain: domain.trim(),
+      key_name: keyName.trim(),
+      allow_axfr: transfer,
+      allow_dns_update: update,
+    };
+    if (subdomains.length > 0) {
+      payload.subdomains = subdomains;
+    }
+
     if (args.json) {
-      out(
-        JSON.stringify(
-          {
-            status: 'ok',
-            domain: domain.trim(),
-            key_name: keyName.trim(),
-            allow_axfr: transfer,
-            allow_dns_update: update,
-          },
-          null,
-          2
-        )
-      );
+      out(JSON.stringify(payload, null, 2));
     } else {
-      out(`Updated TSIG permissions for domain '${domain.trim()}' key '${keyName.trim()}': AXFR=${transfer}, DynamicUpdate=${update}.`);
+      const subMsg = subdomains.length > 0 ? `, Subdomains=[${subdomains.join(', ')}]` : '';
+      out(`Updated TSIG permissions for domain '${domain.trim()}' key '${keyName.trim()}': AXFR=${transfer}, DynamicUpdate=${update}${subMsg}.`);
     }
     return 0;
   }
@@ -622,7 +667,7 @@ export async function cmdTsig(args: ParsedArgs, opts?: CliOptions): Promise<numb
     return 0;
   }
 
-  err(`Error: Unknown tsig action '${action}'. Available actions: list, create, get, set-permissions, clear`);
+  err(`Error: Unknown tsig action '${action}'. Available actions: list, create, get, get-domain, set-permissions, clear`);
   return 2;
 }
 
@@ -788,6 +833,44 @@ export function parseArgs(rawArgs: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === '--subdomain' || arg === '--subdomains' || arg === '-s') {
+      const val = rawArgs[i + 1];
+      if (!result.options.subdomain) {
+        result.options.subdomain = [val];
+      } else if (Array.isArray(result.options.subdomain)) {
+        result.options.subdomain.push(val);
+      } else {
+        result.options.subdomain = [result.options.subdomain as string, val];
+      }
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--subdomain=') || arg.startsWith('--subdomains=')) {
+      const prefix = arg.startsWith('--subdomain=') ? '--subdomain=' : '--subdomains=';
+      const val = arg.slice(prefix.length);
+      if (!result.options.subdomain) {
+        result.options.subdomain = [val];
+      } else if (Array.isArray(result.options.subdomain)) {
+        result.options.subdomain.push(val);
+      } else {
+        result.options.subdomain = [result.options.subdomain as string, val];
+      }
+      i++;
+      continue;
+    }
+    if (arg.startsWith('-s=')) {
+      const val = arg.slice('-s='.length);
+      if (!result.options.subdomain) {
+        result.options.subdomain = [val];
+      } else if (Array.isArray(result.options.subdomain)) {
+        result.options.subdomain.push(val);
+      } else {
+        result.options.subdomain = [result.options.subdomain as string, val];
+      }
+      i++;
+      continue;
+    }
+
     // Positional arguments
     if (!result.command) {
       result.command = arg;
@@ -842,7 +925,7 @@ commands:
   }
 
   if (command === 'tsig') {
-    return `usage: onlydns tsig [-h] {list,create,get,set-permissions,clear} ...
+    return `usage: onlydns tsig [-h] {list,create,get,get-domain,set-permissions,clear} ...
 
 TSIG key management commands
 
@@ -850,7 +933,8 @@ commands:
   list                List all TSIG keys in the account
   create              Generate a new TSIG key
   get                 Get details of a specific TSIG key
-  set-permissions     Configure TSIG key permissions for a domain
+  get-domain (domain) Get TSIG key permissions configured for a domain
+  set-permissions     Configure TSIG key permissions for a domain (with optional --subdomain restrictions)
   clear               Remove all TSIG key permissions for a domain
 `;
   }

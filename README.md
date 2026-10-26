@@ -131,11 +131,18 @@ onlydns tsig list
 # Generate a new TSIG key (key name is generated automatically; algorithms: hmac-sha256, hmac-sha512, etc.)
 onlydns tsig create --algo hmac-sha256
 
-# Retrieve a specific TSIG key
+# Retrieve a specific TSIG key details
 onlydns tsig get <key_name>
 
-# Configure TSIG permissions for zone transfers (AXFR) and Dynamic DNS Updates
+# View TSIG keys and permissions configured on a domain
+onlydns tsig get-domain example.com
+
+# Configure TSIG permissions for zone transfers (AXFR) and Dynamic DNS Updates across whole zone
 onlydns tsig set-permissions example.com <key_name> --transfer --update
+
+# Restrict Dynamic DNS Updates to specific subdomain(s) (e.g., ACME / Let's Encrypt DNS-01 challenges)
+onlydns tsig set-permissions example.com <key_name> --update --subdomain _acme-challenge
+onlydns tsig set-permissions example.com <key_name> -s _acme-challenge -s staging
 
 # Clear all TSIG permissions for a domain
 onlydns tsig clear example.com

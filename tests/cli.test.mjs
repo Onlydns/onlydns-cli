@@ -10,6 +10,7 @@ import {
   formatRecordsTable,
   formatDnssecStatus,
   formatTsigKeysList,
+  formatDomainTsigPermissions,
   setApiKey,
   getApiKey,
   getStoredApiToken,
@@ -54,6 +55,21 @@ test('CLI argument parser handles flags and subcommands correctly', () => {
   assert.equal(parsed.options.type, 'A');
   assert.deepEqual(parsed.options.value, ['192.0.2.1', '192.0.2.2']);
   assert.equal(parsed.options.ttl, 300);
+
+  const parsedTsig = parseArgs([
+    'tsig',
+    'set-permissions',
+    'example.com',
+    'key1',
+    '--update',
+    '--subdomain', '_acme_challenge',
+    '-s', 'staging',
+  ]);
+  assert.equal(parsedTsig.command, 'tsig');
+  assert.equal(parsedTsig.action, 'set-permissions');
+  assert.deepEqual(parsedTsig.positionals, ['example.com', 'key1']);
+  assert.equal(parsedTsig.options.update, true);
+  assert.deepEqual(parsedTsig.options.subdomain, ['_acme_challenge', 'staging']);
 });
 
 test('CLI shows version on --version or -V', async () => {
@@ -406,12 +422,13 @@ test('CLI DNSSEC commands: status, enable, disable', async () => {
   }
 });
 
-test('CLI TSIG commands: list, create, get, set-permissions, clear', async () => {
+test('CLI TSIG commands: list, create, get, get-domain, set-permissions, clear', async () => {
   const originalFetch = globalThis.fetch;
   const mockKeys = [
     { name: 'primary-key', algorithm: 'hmac-sha256', key: 'secret1==' },
     { name: 'secondary-key', algorithm: 'hmac-sha512', key: 'secret2==' },
   ];
+  let lastPatchBody = null;
 
   try {
     globalThis.fetch = async (url, opts) => {
@@ -450,7 +467,23 @@ test('CLI TSIG commands: list, create, get, set-permissions, clear', async () =>
           json: async () => res,
         };
       }
+      if (method === 'GET' && url.endsWith('/dns/example.com/tsig')) {
+        const res = {
+          'primary-key': {
+            allowAxfr: true,
+            allowDnsUpdate: true,
+            subdomains: ['_acme-challenge', 'staging'],
+          },
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(res),
+          json: async () => res,
+        };
+      }
       if (method === 'PATCH' && url.includes('/tsig/')) {
+        lastPatchBody = JSON.parse(opts.body);
         return { status: 200, ok: true, text: async () => JSON.stringify({}), json: async () => ({}) };
       }
       if (method === 'DELETE' && url.endsWith('/tsig')) {
@@ -479,7 +512,22 @@ test('CLI TSIG commands: list, create, get, set-permissions, clear', async () =>
     assert.match(capGet.getStdout(), /TSIG Key 'primary-key':/);
     assert.match(capGet.getStdout(), /Secret:\s+secret1==/);
 
-    // 4. TSIG Set Permissions
+    // 4. TSIG Get Domain Permissions
+    const capGetDomain = createCapture();
+    const codeGetDomain = await runCli(['--api-key', 'mock_token', 'tsig', 'get-domain', 'example.com'], capGetDomain);
+    assert.equal(codeGetDomain, 0);
+    assert.match(capGetDomain.getStdout(), /TSIG Key Permissions for domain 'example\.com':/);
+    assert.match(capGetDomain.getStdout(), /primary-key\s+AXFR=true, DynamicUpdate=true \(Subdomains: _acme-challenge, staging\)/);
+
+    // 5. TSIG Get Domain Permissions JSON
+    const capGetDomainJson = createCapture();
+    const codeGetDomainJson = await runCli(['--api-key', 'mock_token', 'tsig', 'domain', 'example.com', '--json'], capGetDomainJson);
+    assert.equal(codeGetDomainJson, 0);
+    const parsedDomainPerms = JSON.parse(capGetDomainJson.getStdout());
+    assert.equal(parsedDomainPerms['primary-key'].allowAxfr, true);
+    assert.deepEqual(parsedDomainPerms['primary-key'].subdomains, ['_acme-challenge', 'staging']);
+
+    // 6. TSIG Set Permissions without subdomains
     const capPerm = createCapture();
     const codePerm = await runCli([
       '--api-key', 'mock_token',
@@ -488,8 +536,37 @@ test('CLI TSIG commands: list, create, get, set-permissions, clear', async () =>
     ], capPerm);
     assert.equal(codePerm, 0);
     assert.match(capPerm.getStdout(), /Updated TSIG permissions for domain 'example\.com' key 'primary-key': AXFR=true, DynamicUpdate=true/);
+    assert.equal(lastPatchBody.allowAxfr, true);
+    assert.equal(lastPatchBody.allowDnsUpdate, true);
+    assert.equal(lastPatchBody.subdomains, undefined);
 
-    // 5. TSIG Clear
+    // 7. TSIG Set Permissions with --subdomain
+    const capPermSub = createCapture();
+    const codePermSub = await runCli([
+      '--api-key', 'mock_token',
+      'tsig', 'set-permissions', 'example.com', 'primary-key',
+      '--update',
+      '--subdomain', '_acme_challenge',
+      '-s', 'staging',
+    ], capPermSub);
+    assert.equal(codePermSub, 0);
+    assert.match(capPermSub.getStdout(), /Subdomains=\[_acme_challenge, staging\]/);
+    assert.deepEqual(lastPatchBody.subdomains, ['_acme_challenge', 'staging']);
+
+    // 8. TSIG Set Permissions with comma-separated --subdomains and JSON output
+    const capPermSubJson = createCapture();
+    const codePermSubJson = await runCli([
+      '--api-key', 'mock_token',
+      'tsig', 'set-permissions', 'example.com', 'primary-key',
+      '--subdomains', '_acme_challenge,staging',
+      '--json',
+    ], capPermSubJson);
+    assert.equal(codePermSubJson, 0);
+    const parsedSubJson = JSON.parse(capPermSubJson.getStdout());
+    assert.equal(parsedSubJson.status, 'ok');
+    assert.deepEqual(parsedSubJson.subdomains, ['_acme_challenge', 'staging']);
+
+    // 9. TSIG Clear
     const capClear = createCapture();
     const codeClear = await runCli(['--api-key', 'mock_token', 'tsig', 'clear', 'example.com'], capClear);
     assert.equal(codeClear, 0);

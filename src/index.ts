@@ -10,6 +10,7 @@ export {
   formatRecordsTable,
   formatDnssecStatus,
   formatTsigKeysList,
+  formatDomainTsigPermissions,
   cmdDomains,
   cmdRecords,
   cmdDnssec,

@@ -1,6 +1,6 @@
 {
   "name": "@onlydns/cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Official Command-Line Interface (CLI) for OnlyDNS System API (onlydns.com)",
   "author": "OnlyDNS <support@onlydns.com>",
   "license": "MIT",
@@ -44,7 +44,7 @@
     "typescript"
   ],
   "dependencies": {
-    "@onlydns/sdk": "file:../onlydns-sdk/typescript"
+    "@onlydns/sdk": "^1.0.4"
   },
   "devDependencies": {
     "@types/node": "^20.17.24",

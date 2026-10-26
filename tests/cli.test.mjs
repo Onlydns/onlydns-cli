@@ -76,12 +76,12 @@ test('CLI shows version on --version or -V', async () => {
   const cap = createCapture();
   const code = await runCli(['--version'], cap);
   assert.equal(code, 0);
-  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.1/);
+  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.2/);
 
   const cap2 = createCapture();
   const code2 = await runCli(['-V'], cap2);
   assert.equal(code2, 0);
-  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.1/);
+  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.2/);
 });
 
 test('CLI shows help on --help or missing command', async () => {

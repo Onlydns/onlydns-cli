@@ -1,6 +1,6 @@
 {
   "name": "@onlydns/cli",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Official Command-Line Interface (CLI) for OnlyDNS System API (onlydns.com)",
   "author": "OnlyDNS <support@onlydns.com>",
   "license": "MIT",

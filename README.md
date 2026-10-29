@@ -1,8 +1,13 @@
 # @onlydns/cli
 
-Official Command-Line Interface (CLI) for the **OnlyDNS System API** ([onlydns.com](https://www.onlydns.com)).
+Official Command-Line Interface (CLI) for [OnlyDNS](https://www.onlydns.com) to manage DNS zones, DNS records, automated DNSSEC signing, and RFC 2136 TSIG keys directly from your terminal or CI/CD pipelines. Full guide and command references available at the [OnlyDNS CLI Feature Guide](https://www.onlydns.com/features/cli).
 
-Fast, type-safe, and zero-bloat tool for human developers and autonomous AI agents to manage DNS zones, DNS records, DNSSEC signing, and TSIG keys directly from the terminal or scripts.
+```bash
+npm install -g @onlydns/cli
+```
+*Or run instantly:* `npx @onlydns/cli domains list`
+
+**Authentication Environment Variable:** `ONLYDNS_API_KEY` (or login via `onlydns config login <API_KEY>`).
 
 ---
 

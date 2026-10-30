@@ -116,12 +116,11 @@ export function getStoredApiToken(): string | undefined {
  * Resolve API key from environment variables or stored configuration.
  *
  * Priority:
- * 1. ONLYDNS_API_KEY environment variable
- * 2. ONLYDNS_API_TOKEN environment variable
- * 3. Stored config file (~/.config/onlydns/config.json)
+ * 1. ONLYDNS_API_TOKEN environment variable
+ * 2. Stored config file (~/.config/onlydns/config.json)
  */
 export function getApiKey(): string | undefined {
-  const envKey = process.env.ONLYDNS_API_KEY || process.env.ONLYDNS_API_TOKEN;
+  const envKey = process.env.ONLYDNS_API_TOKEN;
   if (envKey && envKey.trim()) {
     return envKey.trim();
   }

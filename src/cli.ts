@@ -55,7 +55,7 @@ export interface ParsedArgs {
   version: boolean;
 }
 
-const CLI_VERSION = '1.0.3';
+const CLI_VERSION = '1.0.4';
 
 function getOut(opts?: CliOptions): (msg: string) => void {
   return opts?.stdout || ((msg: string) => console.log(msg));

@@ -76,12 +76,12 @@ test('CLI shows version on --version or -V', async () => {
   const cap = createCapture();
   const code = await runCli(['--version'], cap);
   assert.equal(code, 0);
-  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.3/);
+  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.4/);
 
   const cap2 = createCapture();
   const code2 = await runCli(['-V'], cap2);
   assert.equal(code2, 0);
-  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.3/);
+  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.4/);
 });
 
 test('CLI shows help on --help or missing command', async () => {
@@ -126,12 +126,10 @@ test('CLI shows subcommand specific help', async () => {
 test('CLI config management: set-key, get-key, path, and clear', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onlydns-test-config-'));
   const originalXdg = process.env.XDG_CONFIG_HOME;
-  const originalKey = process.env.ONLYDNS_API_KEY;
   const originalToken = process.env.ONLYDNS_API_TOKEN;
 
   try {
     process.env.XDG_CONFIG_HOME = tempDir;
-    delete process.env.ONLYDNS_API_KEY;
     delete process.env.ONLYDNS_API_TOKEN;
 
     // 1. Path command
@@ -179,7 +177,6 @@ test('CLI config management: set-key, get-key, path, and clear', async () => {
   } finally {
     if (originalXdg !== undefined) process.env.XDG_CONFIG_HOME = originalXdg;
     else delete process.env.XDG_CONFIG_HOME;
-    if (originalKey !== undefined) process.env.ONLYDNS_API_KEY = originalKey;
     if (originalToken !== undefined) process.env.ONLYDNS_API_TOKEN = originalToken;
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
@@ -578,13 +575,11 @@ test('CLI TSIG commands: list, create, get, get-domain, set-permissions, clear',
 
 test('CLI handles AuthenticationError and API errors gracefully', async () => {
   const originalFetch = globalThis.fetch;
-  const originalKey = process.env.ONLYDNS_API_KEY;
   const originalToken = process.env.ONLYDNS_API_TOKEN;
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onlydns-err-test-'));
 
   try {
     process.env.XDG_CONFIG_HOME = tempDir;
-    delete process.env.ONLYDNS_API_KEY;
     delete process.env.ONLYDNS_API_TOKEN;
 
     // 1. Missing authentication token
@@ -630,7 +625,6 @@ test('CLI handles AuthenticationError and API errors gracefully', async () => {
     assert.match(capUnknown.getStderr(), /Unknown command 'foobar'/);
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalKey !== undefined) process.env.ONLYDNS_API_KEY = originalKey;
     if (originalToken !== undefined) process.env.ONLYDNS_API_TOKEN = originalToken;
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

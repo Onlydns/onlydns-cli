@@ -7,7 +7,7 @@ npm install -g @onlydns/cli
 ```
 *Or run instantly:* `npx @onlydns/cli domains list`
 
-**Authentication Environment Variable:** `ONLYDNS_API_KEY` (or login via `onlydns config login <API_KEY>`).
+**Authentication Environment Variable:** `ONLYDNS_API_TOKEN` (or login via `onlydns config login <API_TOKEN>`).
 
 ---
 
@@ -42,7 +42,7 @@ bunx @onlydns/cli records find example.com --name api
 The CLI resolves API tokens using the following priority order:
 
 1. `--api-key` / `-k` CLI argument
-2. `ONLYDNS_API_KEY` or `ONLYDNS_API_TOKEN` environment variable
+2. `ONLYDNS_API_TOKEN` environment variable
 3. Stored configuration in `~/.config/onlydns/config.json` (or `$XDG_CONFIG_HOME/onlydns/config.json`)
 
 ### Storing Your API Key
@@ -64,7 +64,7 @@ onlydns config clear
 ### Using Environment Variables
 
 ```bash
-export ONLYDNS_API_KEY="your_api_token_here"
+export ONLYDNS_API_TOKEN="your_api_token_here"
 onlydns domains list
 ```
 

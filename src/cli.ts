@@ -22,6 +22,9 @@ import type {
   DomainTsigPermissions,
   RecordType,
   TsigAlgorithm,
+  User,
+  APIToken,
+  Scope,
 } from '@onlydns/sdk';
 
 import {
@@ -55,7 +58,7 @@ export interface ParsedArgs {
   version: boolean;
 }
 
-const CLI_VERSION = '1.0.4';
+const CLI_VERSION = '1.0.5';
 
 function getOut(opts?: CliOptions): (msg: string) => void {
   return opts?.stdout || ((msg: string) => console.log(msg));
@@ -113,6 +116,42 @@ export function formatDnssecStatus(status: DNSSECStatus, domain: string): string
     lines.push(`    [${idx + 1}] KeyTag: ${k.keyTag}, Algorithm: ${algStr}, DigestType: ${dtStr}`);
     lines.push(`        Digest: ${k.digest}`);
   });
+  return lines.join('\n');
+}
+
+export function formatUsersTable(users: User[]): string {
+  if (!users || users.length === 0) {
+    return 'No users found.';
+  }
+  const header = `${'USER ID'.padEnd(20)} ${'USERNAME'.padEnd(28)} ${'SCOPES'.padEnd(24)} ${'ZONES'.padEnd(20)} STATUS`;
+  const separator = '-'.repeat(105);
+  const lines = [header, separator];
+  for (const u of users) {
+    const id = u.userId.padEnd(20);
+    const username = u.userName.padEnd(28);
+    const scopes = (u.scopes || []).join(',').slice(0, 22).padEnd(24);
+    const zones = (u.allowedZones && u.allowedZones.length ? u.allowedZones.join(',') : '*').slice(0, 18).padEnd(20);
+    const status = u.deactivatedAt ? 'Deactivated' : (u.locked ? 'Locked' : 'Active');
+    lines.push(`${id} ${username} ${scopes} ${zones} ${status}`);
+  }
+  return lines.join('\n');
+}
+
+export function formatTokensTable(tokens: APIToken[]): string {
+  if (!tokens || tokens.length === 0) {
+    return 'No API tokens found.';
+  }
+  const header = `${'TOKEN ID'.padEnd(20)} ${'MASKED TOKEN'.padEnd(22)} ${'SCOPES'.padEnd(24)} ${'EXPIRES'.padEnd(14)} STATUS`;
+  const separator = '-'.repeat(94);
+  const lines = [header, separator];
+  for (const t of tokens) {
+    const id = t.tokenId.padEnd(20);
+    const masked = (t.maskedToken || '-').padEnd(22);
+    const scopes = (t.scopes || []).join(',').slice(0, 22).padEnd(24);
+    const expires = t.expiresAt ? t.expiresAt.split('T')[0].padEnd(14) : 'Never'.padEnd(14);
+    const status = t.deactivatedAt ? 'Revoked' : 'Active';
+    lines.push(`${id} ${masked} ${scopes} ${expires} ${status}`);
+  }
   return lines.join('\n');
 }
 
@@ -671,6 +710,408 @@ export async function cmdTsig(args: ParsedArgs, opts?: CliOptions): Promise<numb
   return 2;
 }
 
+export async function cmdUsers(args: ParsedArgs, opts?: CliOptions): Promise<number> {
+  const out = getOut(opts);
+  const err = getErr(opts);
+  const action = args.action;
+
+  if (!action) {
+    err('Error: Please specify a users action (list, get, invite, delete). Usage: onlydns users <action> [options]');
+    return 2;
+  }
+
+  const client = createClient(args, opts);
+
+  if (action === 'list') {
+    const users = await client.listUsers();
+    if (args.json) {
+      out(JSON.stringify(users, null, 2));
+    } else {
+      out(formatUsersTable(users));
+    }
+    return 0;
+  }
+
+  if (action === 'get') {
+    const userId = args.positionals[0] || (args.options.userId as string | undefined);
+    if (!userId || !userId.trim()) {
+      err('Error: User ID is required. Usage: onlydns users get <userId>');
+      return 2;
+    }
+    const user = await client.getUser(userId.trim());
+    if (args.json) {
+      out(JSON.stringify(user, null, 2));
+    } else {
+      out(`User: ${user.userName} (${user.userId})`);
+      out(`  Name:        ${[user.firstName, user.lastName].filter(Boolean).join(' ') || 'N/A'}`);
+      out(`  Phone:       ${user.phone && user.phone !== '0' ? user.phone : 'Not provided'}`);
+      out(`  Scopes:      ${(user.scopes || []).join(', ')}`);
+      out(`  Zones:       ${user.allowedZones && user.allowedZones.length ? user.allowedZones.join(', ') : 'All Zones (*)'}`);
+      out(`  Status:      ${user.deactivatedAt ? 'Deactivated' : (user.locked ? 'Locked' : 'Active')}`);
+    }
+    return 0;
+  }
+
+  if (action === 'invite' || action === 'create') {
+    const email = args.positionals[0] || (args.options.email as string | undefined);
+    if (!email || !email.trim()) {
+      err('Error: Email address is required. Usage: onlydns users invite <email> [--scopes SCOPES] [--zones ZONES] [--phone PHONE]');
+      return 2;
+    }
+    const scopesRaw = (args.options.scopes as string | undefined) || 'admin';
+    const scopes = scopesRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const zonesRaw = args.options.zones as string | undefined;
+    const allowedZones = zonesRaw ? zonesRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const phone = (args.options.phone as string | undefined) || undefined;
+
+    const user = await client.createUser({
+      email: email.trim(),
+      scopes,
+      allowed_zones: allowedZones,
+      phone,
+    });
+    if (args.json) {
+      out(JSON.stringify(user, null, 2));
+    } else {
+      out(`User '${user.userName}' successfully invited (ID: ${user.userId}).`);
+    }
+    return 0;
+  }
+
+  if (action === 'delete' || action === 'deactivate') {
+    const userId = args.positionals[0] || (args.options.userId as string | undefined);
+    if (!userId || !userId.trim()) {
+      err('Error: User ID is required. Usage: onlydns users delete <userId>');
+      return 2;
+    }
+    await client.deleteUser(userId.trim());
+    if (args.json) {
+      out(JSON.stringify({ status: 'ok', userId: userId.trim(), action: 'deactivated' }));
+    } else {
+      out(`User '${userId.trim()}' successfully deactivated.`);
+    }
+    return 0;
+  }
+
+  err(`Error: Unknown users action '${action}'. Available actions: list, get, invite, delete`);
+  return 2;
+}
+
+export async function cmdAccount(args: ParsedArgs, opts?: CliOptions): Promise<number> {
+  const out = getOut(opts);
+  const err = getErr(opts);
+  const action = args.action || 'get';
+  const client = createClient(args, opts);
+
+  if (action === 'get' || action === 'info' || action === 'show') {
+    const info = await client.getAccount();
+    if (args.json) {
+      out(JSON.stringify(info, null, 2));
+    } else {
+      out('Account Details:');
+      out(`  Account ID:   ${info.accountId}`);
+      if (info.companyName) {
+        out(`  Company:      ${info.companyName}`);
+      }
+      if (info.firstName || info.lastName) {
+        out(`  Contact Name: ${((info.firstName || '') + ' ' + (info.lastName || '')).trim()}`);
+      }
+      if (info.address) {
+        const addr = info.address;
+        const parts = [addr.street1, addr.street2, addr.city, addr.state, addr.postalCode, addr.countryId].filter(Boolean);
+        out(`  Address:      ${parts.join(', ')}`);
+      }
+      if (info.package) {
+        const pkg = info.package;
+        out(`  Package:      ${pkg.description} ($${Number(pkg.amount).toFixed(2)}/mo)`);
+        const feats = pkg.features;
+        out(`  Features:     Domains=${feats.domains}, Records=${feats.records}, Queries=${feats.queries}`);
+        out(`                DNSSEC=${feats.dnssec}, TSIG=${feats.tsig}, Proxy=${feats.proxy}, CustomSSO=${feats.customSSO}`);
+      }
+    }
+    return 0;
+  }
+
+  if (action === 'metrics' || action === 'usage') {
+    const metrics = await client.getAccountMetrics();
+    if (args.json) {
+      out(JSON.stringify(metrics, null, 2));
+    } else {
+      out('Account Resource Usage & Entitlements:');
+      out(`  Account ID:             ${metrics.accountId}`);
+      if (metrics.package) {
+        out(`  Active Package:         ${metrics.package.description} (${metrics.package.id})`);
+      }
+      out('');
+      const u = metrics.usage;
+      const fmtLimit = (limit: number) => (limit === -1 ? 'Unlimited' : (limit === 0 ? '0 (Not allowed)' : String(limit)));
+      out('  Resource                Current Usage                  Plan Limit');
+      out('  -----------------------------------------------------------------');
+      out(`  Domains                 ${String(u.domains.current).padEnd(30)} ${fmtLimit(u.domains.limit)}`);
+
+      const recs = u.records;
+      const recsDisplay = recs.maxZoneRecords !== undefined
+        ? `${recs.maxZoneRecords} peak (${recs.totalRecords} total${recs.maxZoneName ? ` - ${recs.maxZoneName}` : ''})`
+        : String(recs.current ?? 0);
+      const recsLimit = recs.limitPerZone !== undefined
+        ? `${fmtLimit(recs.limitPerZone)} / zone`
+        : fmtLimit(recs.limit ?? 0);
+      out(`  DNS Records             ${recsDisplay.padEnd(30)} ${recsLimit}`);
+
+      out(`  Monthly Queries         ${String(u.queries.current).padEnd(30)} ${fmtLimit(u.queries.limit)}`);
+      out(`  DNSSEC-Signed Zones     ${String(u.dnssec.current).padEnd(30)} ${u.dnssec.enabled ? 'Enabled' : 'Disabled'}`);
+      out(`  TSIG Keys               ${String(u.tsigKeys.current).padEnd(30)} ${fmtLimit(u.tsigKeys.limit)}`);
+      out(`  24h API Changes         ${String(u.changesLast24Hours.current).padEnd(30)} ${fmtLimit(u.changesLast24Hours.limit)}`);
+      const rpmDisplay = u.apiRequestsPerMinute.averageLast24Hours !== undefined
+        ? `${u.apiRequestsPerMinute.current} (24h avg: ${u.apiRequestsPerMinute.averageLast24Hours})`
+        : String(u.apiRequestsPerMinute.current);
+      out(`  API Requests / Min      ${rpmDisplay.padEnd(30)} ${fmtLimit(u.apiRequestsPerMinute.limit)}`);
+      out(`  Active API Tokens       ${String(u.apiTokens.current).padEnd(30)} ${fmtLimit(u.apiTokens.limit)}`);
+    }
+    return 0;
+  }
+
+  if (action === 'billing') {
+    const billing = await client.getAccountBilling();
+    if (args.json) {
+      out(JSON.stringify(billing, null, 2));
+    } else {
+      out('Account Billing Status:');
+      out(`  Account ID:             ${billing.accountId}`);
+      out(`  Amount Due:             $${billing.amountDue?.value || '0.00'} ${billing.currency}`);
+      out(`  Past Due Amount:        $${billing.pastDueAmount?.value || '0.00'} ${billing.currency}`);
+      out(`  Past Due:               ${billing.pastDue}`);
+      out(`  Suspended:              ${billing.suspended}`);
+      out(`  Suspended (Non-Payment):${billing.suspendedForNonPayment}`);
+      if (billing.billingAssessedTo) {
+        out(`  Assessed Through:       ${billing.billingAssessedTo}`);
+      }
+    }
+    return 0;
+  }
+
+  if (action === 'oidc') {
+    const oidcAction = args.positionals[0] || 'get';
+
+    if (oidcAction === 'get' || oidcAction === 'show') {
+      const cfg = await client.getAccountOidc();
+      if (args.json) {
+        out(JSON.stringify(cfg, null, 2));
+      } else {
+        out('Custom OIDC SSO Configuration:');
+        out(`  Configured:     ${cfg.configured}`);
+        if (cfg.configured) {
+          out(`  Discovery URL:  ${cfg.discoveryUrl}`);
+          out(`  Client ID:      ${cfg.clientId}`);
+          if (cfg.clientSecretMasked) {
+            out(`  Client Secret:  ${cfg.clientSecretMasked}`);
+          }
+          out(`  Enforce SSO:    ${cfg.enforceSso}`);
+          out(`  Admins Count:   ${cfg.breakGlassAdminsCount}`);
+          if (cfg.nonCompliantUsers && cfg.nonCompliantUsers.length > 0) {
+            out(`  Non-Compliant:  ${cfg.nonCompliantUsers.length} users`);
+            for (const u of cfg.nonCompliantUsers) {
+              out(`    - ${u.userName} (${u.userId}): ${u.reason}`);
+            }
+          }
+        }
+      }
+      return 0;
+    }
+
+    if (oidcAction === 'set' || oidcAction === 'save' || oidcAction === 'update') {
+      const discoveryUrl = (args.options['discovery-url'] || args.options.discoveryUrl) as string | undefined;
+      const clientId = (args.options['client-id'] || args.options.clientId) as string | undefined;
+      const clientSecret = (args.options['client-secret'] || args.options.clientSecret) as string | undefined;
+      const enforceSso = args.options['enforce-sso'] !== undefined
+        ? Boolean(args.options['enforce-sso'])
+        : (args.options.enforceSso !== undefined ? Boolean(args.options.enforceSso) : undefined);
+
+      const cfg = await client.saveAccountOidc({
+        discoveryUrl,
+        clientId,
+        clientSecret,
+        enforceSso,
+      });
+
+      if (args.json) {
+        out(JSON.stringify(cfg, null, 2));
+      } else {
+        out('Custom OIDC SSO configuration saved successfully.');
+        out(`  Discovery URL:  ${cfg.discoveryUrl}`);
+        out(`  Client ID:      ${cfg.clientId}`);
+        out(`  Enforce SSO:    ${cfg.enforceSso}`);
+      }
+      return 0;
+    }
+
+    if (oidcAction === 'delete' || oidcAction === 'remove' || oidcAction === 'clear') {
+      const res = await client.deleteAccountOidc();
+      if (args.json) {
+        out(JSON.stringify(res, null, 2));
+      } else {
+        out('Custom OIDC SSO configuration removed successfully.');
+      }
+      return 0;
+    }
+
+    if (oidcAction === 'test') {
+      const discoveryUrl = (args.options['discovery-url'] || args.options.discoveryUrl || args.positionals[1]) as string | undefined;
+      const clientId = (args.options['client-id'] || args.options.clientId) as string | undefined;
+      const clientSecret = (args.options['client-secret'] || args.options.clientSecret) as string | undefined;
+      const testOpts: { discoveryUrl?: string; clientId?: string; clientSecret?: string } = {};
+      if (discoveryUrl) testOpts.discoveryUrl = discoveryUrl;
+      if (clientId) testOpts.clientId = clientId;
+      if (clientSecret) testOpts.clientSecret = clientSecret;
+
+      const res = await client.testAccountOidc(Object.keys(testOpts).length ? testOpts : undefined);
+      if (args.json) {
+        out(JSON.stringify(res, null, 2));
+      } else {
+        if (res.success) {
+          out('OIDC SSO discovery endpoint test successful.');
+          if (res.issuer) {
+            out(`  Issuer:         ${res.issuer}`);
+          }
+          if (res.authorizationEndpoint) {
+            out(`  Auth Endpoint:  ${res.authorizationEndpoint}`);
+          }
+          if (res.tokenEndpoint) {
+            out(`  Token Endpoint: ${res.tokenEndpoint}`);
+          }
+          if (res.clientCredentialsTested) {
+            const status = res.clientCredentialsValid ? 'Validated' : 'Failed';
+            out(`  Client Creds:   ${status}`);
+          }
+        } else {
+          out('OIDC SSO discovery endpoint test failed.');
+        }
+      }
+      return 0;
+    }
+
+    err(`Error: Unknown oidc action '${oidcAction}'. Available actions: get, set, delete, test`);
+    return 2;
+  }
+
+  err(`Error: Unknown account action '${action}'. Available actions: get, oidc`);
+  return 2;
+}
+
+export async function cmdTokens(args: ParsedArgs, opts?: CliOptions): Promise<number> {
+  const out = getOut(opts);
+  const err = getErr(opts);
+  const action = args.action;
+
+  if (!action) {
+    err('Error: Please specify a tokens action (list, get, create, delete). Usage: onlydns tokens <action> [options]');
+    return 2;
+  }
+
+  const client = createClient(args, opts);
+
+  if (action === 'list') {
+    const tokens = await client.listTokens();
+    if (args.json) {
+      out(JSON.stringify(tokens, null, 2));
+    } else {
+      out(formatTokensTable(tokens));
+    }
+    return 0;
+  }
+
+  if (action === 'get') {
+    const tokenId = args.positionals[0] || (args.options.tokenId as string | undefined);
+    if (!tokenId || !tokenId.trim()) {
+      err('Error: Token ID is required. Usage: onlydns tokens get <tokenId>');
+      return 2;
+    }
+    const token = await client.getToken(tokenId.trim());
+    if (args.json) {
+      out(JSON.stringify(token, null, 2));
+    } else {
+      out(`Token: ${token.maskedToken || token.tokenId} (${token.tokenId})`);
+      out(`  Scopes:   ${(token.scopes || []).join(', ')}`);
+      out(`  Zones:    ${token.allowedZones && token.allowedZones.length ? token.allowedZones.join(', ') : 'All Zones (*)'}`);
+      out(`  Networks: ${token.allowedNetwork && token.allowedNetwork.length ? token.allowedNetwork.join(', ') : '0.0.0.0/0 (Any)'}`);
+      out(`  Expires:  ${token.expiresAt || 'Never'}`);
+    }
+    return 0;
+  }
+
+  if (action === 'create') {
+    const scopesRaw = (args.options.scopes as string | undefined) || 'records:write';
+    const scopes = scopesRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const zonesRaw = args.options.zones as string | undefined;
+    const allowedZones = zonesRaw ? zonesRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const networkRaw = args.options.network as string | undefined;
+    const allowedNetwork = networkRaw ? networkRaw.split(',').map((s) => s.trim()).filter(Boolean) : undefined;
+    const expires = args.options.expires as string | undefined;
+
+    const token = await client.createToken({
+      scopes,
+      allowed_zones: allowedZones,
+      allowed_network: allowedNetwork,
+      expires_at: expires,
+    });
+    if (args.json) {
+      out(JSON.stringify(token, null, 2));
+    } else {
+      out(`API Key Created Successfully:`);
+      out(`  Token:    ${token.token || token.authorization || ''}`);
+      out(`  Scopes:   ${(token.scopes || []).join(', ')}`);
+      out(`  Expires:  ${token.expiresAt || 'Never'}`);
+      out(`  Notice:   Copy this token now; full secret will not be displayed again.`);
+    }
+    return 0;
+  }
+
+  if (action === 'delete' || action === 'revoke') {
+    const tokenId = args.positionals[0] || (args.options.tokenId as string | undefined);
+    if (!tokenId || !tokenId.trim()) {
+      err('Error: Token ID is required. Usage: onlydns tokens delete <tokenId>');
+      return 2;
+    }
+    await client.deleteToken(tokenId.trim());
+    if (args.json) {
+      out(JSON.stringify({ status: 'ok', tokenId: tokenId.trim(), action: 'revoked' }));
+    } else {
+      out(`API Key '${tokenId.trim()}' successfully revoked.`);
+    }
+    return 0;
+  }
+
+  err(`Error: Unknown tokens action '${action}'. Available actions: list, get, create, delete`);
+  return 2;
+}
+
+export async function cmdLogin(args: ParsedArgs, opts?: CliOptions): Promise<number> {
+  const out = getOut(opts);
+  const err = getErr(opts);
+  const username = args.positionals[0] || (args.options.username as string | undefined);
+  const password = args.positionals[1] || (args.options.password as string | undefined);
+
+  if (!username || !username.trim() || !password || !password.trim()) {
+    err('Error: Username and password are required. Usage: onlydns login <username> <password>');
+    return 2;
+  }
+
+  const baseUrl = args.baseUrl || opts?.baseUrl || OnlyDNSClient.DEFAULT_BASE_URL;
+  const res = await OnlyDNSClient.login({
+    username: username.trim(),
+    password: password.trim(),
+  }, { baseUrl });
+
+  setApiKey(res.token);
+
+  if (args.json) {
+    out(JSON.stringify({ status: 'ok', user: res.user, token_type: res.token_type, expires_in: res.expires_in }, null, 2));
+  } else {
+    out(`Successfully authenticated as '${res.user.userName}'. Saved JWT bearer token to configuration.`);
+  }
+  return 0;
+}
+
 // -----------------------------------------------------------------------------
 // Argument Parsing & Help
 // -----------------------------------------------------------------------------
@@ -871,10 +1312,142 @@ export function parseArgs(rawArgs: string[]): ParsedArgs {
       continue;
     }
 
+    if (arg === '--scopes' || arg === '--scope') {
+      result.options.scopes = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--scopes=') || arg.startsWith('--scope=')) {
+      result.options.scopes = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--zones' || arg === '--zone') {
+      result.options.zones = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--zones=') || arg.startsWith('--zone=')) {
+      result.options.zones = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--expires' || arg === '--expires-at' || arg === '--exp') {
+      result.options.expires = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--expires=') || arg.startsWith('--expires-at=') || arg.startsWith('--exp=')) {
+      result.options.expires = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--network' || arg === '--ip') {
+      result.options.network = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--network=') || arg.startsWith('--ip=')) {
+      result.options.network = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--phone' || arg === '--phone-number') {
+      result.options.phone = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--phone=') || arg.startsWith('--phone-number=')) {
+      result.options.phone = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--username' || arg === '-u') {
+      result.options.username = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--username=') || arg.startsWith('-u=')) {
+      result.options.username = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--password' || arg === '-p') {
+      result.options.password = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--password=') || arg.startsWith('-p=')) {
+      result.options.password = arg.split('=')[1];
+      i++;
+      continue;
+    }
+
+    if (arg === '--discovery-url' || arg === '--url') {
+      result.options['discovery-url'] = rawArgs[i + 1];
+      result.options.discoveryUrl = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--discovery-url=') || arg.startsWith('--url=')) {
+      const val = arg.split('=')[1];
+      result.options['discovery-url'] = val;
+      result.options.discoveryUrl = val;
+      i++;
+      continue;
+    }
+
+    if (arg === '--client-id') {
+      result.options['client-id'] = rawArgs[i + 1];
+      result.options.clientId = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--client-id=')) {
+      const val = arg.split('=')[1];
+      result.options['client-id'] = val;
+      result.options.clientId = val;
+      i++;
+      continue;
+    }
+
+    if (arg === '--client-secret') {
+      result.options['client-secret'] = rawArgs[i + 1];
+      result.options.clientSecret = rawArgs[i + 1];
+      i += 2;
+      continue;
+    }
+    if (arg.startsWith('--client-secret=')) {
+      const val = arg.split('=')[1];
+      result.options['client-secret'] = val;
+      result.options.clientSecret = val;
+      i++;
+      continue;
+    }
+
+    if (arg === '--enforce-sso' || arg === '--enforce') {
+      result.options['enforce-sso'] = true;
+      result.options.enforceSso = true;
+      i++;
+      continue;
+    }
+    if (arg === '--no-enforce-sso' || arg === '--no-enforce') {
+      result.options['enforce-sso'] = false;
+      result.options.enforceSso = false;
+      i++;
+      continue;
+    }
+
     // Positional arguments
     if (!result.command) {
       result.command = arg;
-    } else if (!result.action && ['domains', 'records', 'dnssec', 'tsig', 'config'].includes(result.command)) {
+    } else if (!result.action && ['domains', 'records', 'dnssec', 'tsig', 'config', 'users', 'tokens', 'account'].includes(result.command)) {
       result.action = arg;
     } else {
       result.positionals.push(arg);
@@ -952,8 +1525,54 @@ commands:
 `;
   }
 
+  if (command === 'users') {
+    return `usage: onlydns users [-h] {list,get,invite,delete} ...
+
+Portal user management commands
+
+commands:
+  list                List all users in the account
+  get <userId>        Get user details and assigned permissions
+  invite <email>      Invite a new portal user (--scopes, --zones)
+  delete <userId>     Deactivate a portal user
+`;
+  }
+
+  if (command === 'tokens') {
+    return `usage: onlydns tokens [-h] {list,get,create,delete} ...
+
+API token management commands
+
+commands:
+  list                List all API access tokens
+  get <tokenId>       Get token details and metadata
+  create              Generate a new API token (--scopes, --zones, --expires, --network)
+  delete <tokenId>    Revoke/deactivate an API token
+`;
+  }
+
+  if (command === 'account') {
+    return `usage: onlydns account [-h] {get,metrics,billing,oidc} ...
+
+Account details, metrics, billing, and custom OIDC SSO commands
+
+commands:
+  get (info, show)    Get account metadata, contact details, and billing package feature entitlements
+  metrics (usage)     Get real-time resource usage statistics and plan limits
+  billing             Get account billing balance and suspension status
+  oidc                Manage custom OIDC SSO settings (get, set, delete, test)
+`;
+  }
+
+  if (command === 'login') {
+    return `usage: onlydns login <username> <password>
+
+Authenticate with user credentials and save a short-lived JWT token.
+`;
+  }
+
   return `usage: onlydns [-h] [--api-key API_KEY] [--base-url BASE_URL] [--json] [--timeout TIMEOUT] [--version]
-               {domains,records,dnssec,tsig,config} ...
+               {domains,records,dnssec,tsig,users,tokens,account,login,config} ...
 
 Command-line interface for OnlyDNS API (onlydns.com).
 
@@ -970,6 +1589,10 @@ commands:
   records               DNS record management (list, add, update, remove, find)
   dnssec                DNSSEC management (status, enable, disable)
   tsig                  TSIG key management (list, create, get, set-permissions, clear)
+  users                 Portal user management (list, get, invite, delete)
+  tokens                API token management (list, get, create, delete)
+  account               Account details, metrics, billing, and custom OIDC SSO management (get, metrics, billing, oidc)
+  login                 Interactive user authentication
   config                Configuration and authentication (set-key, get-key, path, clear)
 `;
 }
@@ -1004,10 +1627,18 @@ export async function runCli(argv: string[], opts?: CliOptions): Promise<number>
         return await cmdDnssec(args, opts);
       case 'tsig':
         return await cmdTsig(args, opts);
+      case 'users':
+        return await cmdUsers(args, opts);
+      case 'tokens':
+        return await cmdTokens(args, opts);
+      case 'account':
+        return await cmdAccount(args, opts);
+      case 'login':
+        return await cmdLogin(args, opts);
       case 'config':
         return await cmdConfig(args, opts);
       default:
-        err(`Error: Unknown command '${args.command}'. Available commands: domains, records, dnssec, tsig, config`);
+        err(`Error: Unknown command '${args.command}'. Available commands: domains, records, dnssec, tsig, users, tokens, account, login, config`);
         out(showHelp());
         return 2;
     }

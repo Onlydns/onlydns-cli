@@ -76,12 +76,12 @@ test('CLI shows version on --version or -V', async () => {
   const cap = createCapture();
   const code = await runCli(['--version'], cap);
   assert.equal(code, 0);
-  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.4/);
+  assert.match(cap.getStdout(), /@onlydns\/cli 1\.0\.5/);
 
   const cap2 = createCapture();
   const code2 = await runCli(['-V'], cap2);
   assert.equal(code2, 0);
-  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.4/);
+  assert.match(cap2.getStdout(), /@onlydns\/cli 1\.0\.5/);
 });
 
 test('CLI shows help on --help or missing command', async () => {
@@ -627,5 +627,271 @@ test('CLI handles AuthenticationError and API errors gracefully', async () => {
     globalThis.fetch = originalFetch;
     if (originalToken !== undefined) process.env.ONLYDNS_API_TOKEN = originalToken;
     fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('CLI users command handles user get with optional phone and invite', async () => {
+  const originalFetch = globalThis.fetch;
+  let lastRequestBody = null;
+
+  try {
+    globalThis.fetch = async (url, init) => {
+      const urlStr = String(url);
+      if (init && init.body) {
+        lastRequestBody = JSON.parse(init.body);
+      }
+
+      if (urlStr.endsWith('/users/user_with_phone')) {
+        const data = {
+          userId: 'user_with_phone',
+          accountId: 'acc_123',
+          userName: 'phoneuser@example.com',
+          firstName: 'Phone',
+          lastName: 'User',
+          phone: '+15551234567',
+          scopes: ['read', 'records:write'],
+          allowedZones: ['example.com'],
+          locked: false,
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/users/user_without_phone')) {
+        const data = {
+          userId: 'user_without_phone',
+          accountId: 'acc_123',
+          userName: 'nophone@example.com',
+          firstName: 'No',
+          lastName: 'Phone',
+          phone: null,
+          scopes: ['admin'],
+          allowedZones: null,
+          locked: false,
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/users') && init?.method === 'POST') {
+        const data = {
+          userId: 'new_user_id',
+          accountId: 'acc_123',
+          userName: lastRequestBody.email,
+          phone: lastRequestBody.phone || null,
+          scopes: lastRequestBody.scopes || ['admin'],
+        };
+        return {
+          status: 201,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      return {
+        status: 404,
+        ok: false,
+        text: async () => JSON.stringify({ title: 'Not Found', description: ['Resource not found'] }),
+        json: async () => ({ title: 'Not Found', description: ['Resource not found'] }),
+      };
+    };
+
+    // 1. User with phone
+    const cap1 = createCapture();
+    const code1 = await runCli(['--api-key', 'mock_key', 'users', 'get', 'user_with_phone'], cap1);
+    assert.equal(code1, 0);
+    assert.match(cap1.getStdout(), /Phone:\s+\+15551234567/);
+
+    // 2. User without phone ("Not provided")
+    const cap2 = createCapture();
+    const code2 = await runCli(['--api-key', 'mock_key', 'users', 'get', 'user_without_phone'], cap2);
+    assert.equal(code2, 0);
+    assert.match(cap2.getStdout(), /Phone:\s+Not provided/);
+
+    // 3. User invite with phone option
+    const cap3 = createCapture();
+    const code3 = await runCli(['--api-key', 'mock_key', 'users', 'invite', 'new@example.com', '--phone', '+15559876543'], cap3);
+    assert.equal(code3, 0);
+    assert.equal(lastRequestBody.phone, '+15559876543');
+    assert.match(cap3.getStdout(), /User 'new@example\.com' successfully invited/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('CLI account commands: get account details, oidc get, oidc set, oidc test, oidc delete', async () => {
+  const originalFetch = globalThis.fetch;
+  let lastBody = null;
+  let lastMethod = null;
+
+  try {
+    globalThis.fetch = async (url, init) => {
+      const urlStr = String(url);
+      lastMethod = init?.method || 'GET';
+      if (init && init.body) {
+        lastBody = JSON.parse(init.body);
+      }
+
+      if (urlStr.endsWith('/account') && lastMethod === 'GET') {
+        const data = {
+          accountId: '018f1234-5678-7000-8000-000000000001',
+          activeAt: '2024-01-01T00:00:00+00:00',
+          companyName: 'Acme Corporation',
+          firstName: 'Jane',
+          lastName: 'Doe',
+          address: {
+            street1: '123 Innovation Way',
+            city: 'Austin',
+            state: 'TX',
+            countryId: 'US',
+            postalCode: '78701',
+          },
+          package: {
+            id: '018f1234-5678-7000-8000-000000000002',
+            description: 'Enterprise Tier',
+            amount: 49.99,
+            features: {
+              domains: 50,
+              records: 5000,
+              queries: 1000000,
+              dnssec: true,
+              tsig: true,
+              proxy: true,
+              customSSO: true,
+            },
+          },
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/account/oidc') && lastMethod === 'GET') {
+        const data = {
+          configured: true,
+          accountId: '018f1234-5678-7000-8000-000000000001',
+          discoveryUrl: 'https://idp.example.com/.well-known/openid-configuration',
+          clientId: 'client-123',
+          clientSecretMasked: 'secr*****',
+          enforceSso: false,
+          breakGlassAdminsCount: 1,
+          canEnforceSso: true,
+          nonCompliantUsers: [],
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/account/oidc') && lastMethod === 'POST') {
+        const data = {
+          configured: true,
+          discoveryUrl: lastBody.discoveryUrl,
+          clientId: lastBody.clientId,
+          enforceSso: Boolean(lastBody.enforceSso),
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/account/oidc') && lastMethod === 'DELETE') {
+        const data = {
+          success: true,
+          message: 'OIDC configuration removed successfully',
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      if (urlStr.endsWith('/account/oidc/test') && lastMethod === 'POST') {
+        const data = {
+          success: true,
+          issuer: 'https://idp.example.com',
+          authorizationEndpoint: 'https://idp.example.com/oauth2/v1/authorize',
+          tokenEndpoint: 'https://idp.example.com/oauth2/v1/token',
+        };
+        return {
+          status: 200,
+          ok: true,
+          text: async () => JSON.stringify(data),
+          json: async () => data,
+        };
+      }
+
+      return {
+        status: 404,
+        ok: false,
+        text: async () => JSON.stringify({ title: 'Not Found' }),
+        json: async () => ({ title: 'Not Found' }),
+      };
+    };
+
+    // 1. account get
+    const cap1 = createCapture();
+    const code1 = await runCli(['--api-key', 'mock_key', 'account'], cap1);
+    assert.equal(code1, 0);
+    assert.match(cap1.getStdout(), /018f1234-5678-7000-8000-000000000001/);
+    assert.match(cap1.getStdout(), /CustomSSO=true/);
+
+    // 2. account oidc get
+    const cap2 = createCapture();
+    const code2 = await runCli(['--api-key', 'mock_key', 'account', 'oidc', 'get'], cap2);
+    assert.equal(code2, 0);
+    assert.match(cap2.getStdout(), /Configured:\s+true/);
+    assert.match(cap2.getStdout(), /client-123/);
+
+    // 3. account oidc set
+    const cap3 = createCapture();
+    const code3 = await runCli([
+      '--api-key', 'mock_key',
+      'account', 'oidc', 'set',
+      '--discovery-url', 'https://idp.example.com/.well-known/openid-configuration',
+      '--client-id', 'client-123',
+      '--client-secret', 'secret123',
+      '--enforce-sso',
+    ], cap3);
+    assert.equal(code3, 0);
+    assert.equal(lastBody.discoveryUrl, 'https://idp.example.com/.well-known/openid-configuration');
+    assert.equal(lastBody.clientId, 'client-123');
+    assert.equal(lastBody.enforceSso, true);
+    assert.match(cap3.getStdout(), /Custom OIDC SSO configuration saved successfully/);
+
+    // 4. account oidc test
+    const cap4 = createCapture();
+    const code4 = await runCli(['--api-key', 'mock_key', 'account', 'oidc', 'test', '--discovery-url', 'https://idp.example.com'], cap4);
+    assert.equal(code4, 0);
+    assert.match(cap4.getStdout(), /OIDC SSO discovery endpoint test successful/);
+    assert.match(cap4.getStdout(), /https:\/\/idp\.example\.com/);
+
+    // 5. account oidc delete
+    const cap5 = createCapture();
+    const code5 = await runCli(['--api-key', 'mock_key', 'account', 'oidc', 'delete'], cap5);
+    assert.equal(code5, 0);
+    assert.match(cap5.getStdout(), /Custom OIDC SSO configuration removed successfully/);
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });

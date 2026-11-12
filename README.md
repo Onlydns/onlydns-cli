@@ -35,6 +35,55 @@ npx @onlydns/cli domains list
 bunx @onlydns/cli records find example.com --name api
 ```
 
+### Manual Installation from GitHub
+
+To install the CLI manually from source for development or testing:
+
+```bash
+# Clone the repository
+git clone https://github.com/Onlydns/onlydns-cli.git
+cd onlydns-cli
+
+# Install dependencies and build
+npm install
+npm run build
+
+# Link globally to use the `onlydns` command anywhere
+npm link
+```
+
+### Linking the Development / GitHub TypeScript SDK
+
+When developing or testing new features that require unreleased changes from the TypeScript SDK (`@onlydns/sdk`), you can install or link the SDK from GitHub:
+
+#### Option A: Local Development with `npm link` (Recommended)
+
+When working on both repositories locally:
+
+```bash
+# 1. Clone and build the TypeScript SDK
+git clone https://github.com/Onlydns/onlydns-sdk-typescript.git
+cd onlydns-sdk-typescript
+npm install
+npm run build
+npm link
+
+# 2. Link the local SDK inside the CLI repository
+cd ../onlydns-cli
+npm link @onlydns/sdk
+npm run build
+```
+
+#### Option B: Install SDK Directly from GitHub
+
+To install the latest GitHub version of the SDK into your CLI project:
+
+```bash
+cd onlydns-cli
+npm install github:Onlydns/onlydns-sdk-typescript
+npm run build
+```
+
 ---
 
 ## Authentication & Configuration
@@ -176,18 +225,6 @@ onlydns --base-url https://api.onlydns.com/v1 --timeout 15 domains list
 | `--timeout` | | HTTP request timeout in seconds (default: 30) |
 | `--help` | `-h` | Display help and usage instructions |
 | `--version` | `-V` | Show version number |
-
----
-
-## Programmatic Usage
-
-You can also import and invoke the CLI programmatically within TypeScript/JavaScript tools:
-
-```typescript
-import { runCli } from '@onlydns/cli';
-
-const exitCode = await runCli(['records', 'list', 'example.com', '--json']);
-```
 
 ---
 
